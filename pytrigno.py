@@ -177,7 +177,7 @@ class TrignoEMG(_BaseTrignoDaq):
     """
 
     def __init__(self, channel_range, samples_per_read, units='V',
-                 host='localhost', cmd_port=50040, data_port=50041, timeout=10):
+                 host='localhost', cmd_port=50040, data_port=50043, timeout=10):
         super(TrignoEMG, self).__init__(
             host=host, cmd_port=cmd_port, data_port=data_port,
             total_channels=16, timeout=timeout)
@@ -287,4 +287,70 @@ class TrignoAccel(_BaseTrignoDaq):
         """
         data = super(TrignoAccel, self).read(self.samples_per_read)
         data = data[self.channel_range[0]:self.channel_range[1]+1, :]
+        return data
+
+
+class TrignoIM(_BaseTrignoDaq):
+    """
+    Delsys Trigno wireless EMG system accelerometer, gyroscope and mag data. This is for trigno avanti sensor.
+
+    Requires the Trigno Control Utility to be running.
+
+    Parameters
+    ----------
+    channel_range : tuple with 2 ints
+        Sensor channels to use, e.g. (lowchan, highchan) obtains data from
+        channels lowchan through highchan. Each sensor has three accelerometer
+        channels three gyroscope channels and three Mag channels.
+    samples_per_read : int
+        Number of samples per channel to read in each read operation.
+    host : str, optional
+        IP address the TCU server is running on. By default, the device is
+        assumed to be attached to the local machine.
+    cmd_port : int, optional
+        Port of TCU command messages.
+    data_port : int, optional
+        Port of TCU IM data access. By default, 50044 is used, but
+        it is configurable through the TCU graphical user interface.
+    timeout : float, optional
+        Number of seconds before socket returns a timeout exception.
+    """
+    def __init__(self, channel_range, samples_per_read, host='localhost',
+                 cmd_port=50040, data_port=50044, timeout=10):
+        super(TrignoIM, self).__init__(
+            host=host, cmd_port=cmd_port, data_port=data_port,
+            total_channels=144, timeout=timeout)
+
+        self.channel_range = channel_range
+        self.samples_per_read = samples_per_read
+
+        self.rate = 148.1
+
+    def set_channel_range(self, channel_range):
+        """
+        Sets the number of channels to read from the device.
+
+        Parameters
+        ----------
+        channel_range : tuple
+            Sensor channels to use (lowchan, highchan).
+        """
+        self.channel_range = channel_range
+        self.num_channels = channel_range[1] - channel_range[0] + 1
+
+    def read(self):
+        """
+        Request a sample of data from the device.
+
+        This is a blocking method, meaning it returns only once the requested
+        number of samples are available.
+
+        Returns
+        -------
+        data : ndarray, shape=(num_channels, num_samples)
+            Data read from the device. Each channel is a row and each column
+            is a point in time.
+        """
+        data = super(TrignoIM, self).read(self.samples_per_read)
+        data = data[self.channel_range[0]:self.channel_range[1], :]
         return data
