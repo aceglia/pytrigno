@@ -88,17 +88,19 @@ class _BaseTrignoDaq(object):
             Data read from the device. Each channel is a row and each column
             is a point in time.
         """
+        sock = socket.create_connection(
+            (self.host, self.data_port), self.timeout)
         l_des = num_samples * self._min_recv_size
         l = 0
         packet = bytes()
-        while l < l_des:
-            try:
-                packet += self._data_socket.recv(l_des - l)
-            except socket.timeout:
-                l = len(packet)
-                packet += b'\x00' * (l_des - l)
-                raise IOError("Device disconnected.")
-            l = len(packet)
+        # while l < l_des:
+            # try:
+        packet += sock.recv(l_des)
+        # except socket.timeout:
+        #     l = len(packet)
+        #     packet += b'\x00' * (l_des - l)
+        #     raise IOError("Device disconnected.")
+        l = len(packet)
 
         data = numpy.asarray(
             struct.unpack('<'+'f'*self.total_channels*num_samples, packet))
@@ -133,8 +135,8 @@ class _BaseTrignoDaq(object):
     @staticmethod
     def _validate(response):
         s = str(response)
-        if 'OK' not in s:
-            print("warning: TrignoDaq command failed: {}".format(s))
+        # if 'OK' not in s:
+        #     print("warning: TrignoDaq command failed: {}".format(s))
 
 
 class TrignoEMG(_BaseTrignoDaq):
