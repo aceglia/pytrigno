@@ -93,17 +93,10 @@ class _BaseTrignoDaq(object):
         l_des = num_samples * self._min_recv_size
         l = 0
         packet = bytes()
-        # while l < l_des:
-            # try:
-        packet += sock.recv(l_des)
-        # except socket.timeout:
-        #     l = len(packet)
-        #     packet += b'\x00' * (l_des - l)
-        #     raise IOError("Device disconnected.")
-        l = len(packet)
-
-        data = numpy.asarray(
-            struct.unpack('<'+'f'*self.total_channels*num_samples, packet))
+        while l < l_des:
+            packet += sock.recv(l_des-l)
+            l = len(packet)
+        data = numpy.asarray(struct.unpack('<'+'f'*self.total_channels*num_samples, packet))
         data = numpy.transpose(data.reshape((-1, self.total_channels)))
 
         return data
