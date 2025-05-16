@@ -1,8 +1,8 @@
 import socket
 import struct
-from enums import EMGType
+from .enums import EMGType
 import numpy
-from sdk_client import TrignoSDKClient
+from .sdk_client import TrignoSDKClient
 
 class _BaseTrignoDaq(object):
     """
@@ -174,7 +174,7 @@ class TrignoEMG(TrignoSDKClient):
     """
 
     def __init__(self, channel_range, samples_per_read, units='V',
-                 host='127.0.0.1', cmd_port=50040, timeout=2.0, emg_type=EMGType.Avanti, fast_mode=False):
+                 host='127.0.0.1', cmd_port=50040, timeout=10.0, emg_type=EMGType.Avanti, fast_mode=False):
         self.data_port = emg_type.value
         self.emg_type = emg_type
         self.n_channels = 16
@@ -215,7 +215,7 @@ class TrignoEMG(TrignoSDKClient):
             is a point in time.
         """
         data = super(TrignoEMG, self).read(self.buffer_size, self.n_channels)
-        data = data[data !=0 ]
+        # data = data[data !=0 ]
         # data = data[self.channel_range[0]:self.channel_range[1]+1, :]
         return self.scaler * data
 
@@ -338,3 +338,4 @@ class TrignoIM(_BaseTrignoDaq):
         data = super(TrignoIM, self).read(self.samples_per_read)
         data = data[self.channel_range[0]:self.channel_range[1], :]
         return data
+

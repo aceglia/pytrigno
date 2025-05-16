@@ -61,7 +61,7 @@ class TrignoSDKClient:
         if self._comm_socket is None:
             raise RuntimeError("Not connected. Call connect() first.")
 
-        full_command = f"{command}\r\n\r"
+        full_command = f"{command}\r\n\r\n"
         self._comm_socket.sendall(full_command.encode('ascii'))
 
         # If in fast mode, return immediately without waiting for a response
@@ -74,18 +74,19 @@ class TrignoSDKClient:
             response = self._comm_socket.recv(1024)
             return response.decode('ascii').strip()
         except socket.timeout:
-            return ""
+            raise RuntimeError("Streaming not started")
         
     def read(self, buffer_size, n_channels):
-        data = b''
-        while len(data) < buffer_size:
-            packet = self._data_socket.recv(buffer_size - len(data))
-            if not packet:
-                return None
-            data += packet
-        emg_values = struct.unpack('<' + 'f' * (buffer_size // 4), data)
-        emg_array = np.array(emg_values).reshape(-1, n_channels)
-        return emg_array
+        sock = socket.create_connection(
+            (self.host, self.data_port), self.timeout)
+        l = 0
+        packet = bytes()
+        while l < buffer_size:
+            packet += sock.recv(buffer_size-l)
+            l = len(packet)
+        data = np.asarray(struct.unpack('<'+'f'*(buffer_size // 4), packet))
+        data = np.transpose(data.reshape((-1, n_channels)))
+        return data
 
     # def read(self, num_samples):
     #     """

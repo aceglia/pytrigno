@@ -1,0 +1,1 @@
+from .streaming import TrignoEMG, TrignoAccel, TrignoIM, TrignoSDKClient
