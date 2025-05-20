@@ -1,6 +1,6 @@
 import socket
 import struct
-from .enums import EMGType
+# from .enums import EMGType
 import numpy
 from .sdk_client import TrignoSDKClient
 
@@ -59,9 +59,9 @@ class _BaseTrignoDaq(object):
             (self.host, self.cmd_port), self.timeout)
         self._comm_socket.recv(1024)
 
-        # create the data socket
-        self._data_socket = socket.create_connection(
-            (self.host, self.data_port), self.timeout)
+        # # create the data socket
+        # self._data_socket = socket.create_connection(
+        #     (self.host, self.data_port), self.timeout)
 
     def start(self):
         """
@@ -134,7 +134,7 @@ class _BaseTrignoDaq(object):
         #     print("warning: TrignoDaq command failed: {}".format(s))
 
 
-class TrignoEMG(TrignoSDKClient):
+class TrignoEMG(_BaseTrignoDaq):
     """
     Delsys Trigno wireless EMG system EMG data.
 
@@ -174,14 +174,12 @@ class TrignoEMG(TrignoSDKClient):
     """
 
     def __init__(self, channel_range, samples_per_read, units='V',
-                 host='127.0.0.1', cmd_port=50040, timeout=10.0, emg_type=EMGType.Avanti, fast_mode=False):
-        self.data_port = emg_type.value
-        self.emg_type = emg_type
+                 host='127.0.0.1', cmd_port=50040,timeout=10.0, fast_mode=False):
         self.n_channels = 16
-        super(TrignoEMG, self).__init__(host=host, cmd_port=cmd_port, data_port=self.data_port, timeout=timeout, fast_mode=fast_mode)
+        super(TrignoEMG, self).__init__(host=host, cmd_port=cmd_port, timeout=timeout, total_channels=16, data_port=50043, )
         self.channel_range = channel_range
         self.samples_per_read = samples_per_read
-        self.buffer_size = super(TrignoEMG, self).buffer_size(self.n_channels, samples_per_read)
+        # self.buffer_size = super(TrignoEMG, self).buffer_size(self.n_channels, samples_per_read)
         self.rate = 2000
         self.scaler = 1.
         if units == 'mV':
@@ -214,7 +212,7 @@ class TrignoEMG(TrignoSDKClient):
             Data read from the device. Each channel is a row and each column
             is a point in time.
         """
-        data = super(TrignoEMG, self).read(self.buffer_size, self.n_channels)
+        data = super(TrignoEMG, self).read(self.samples_per_read)
         # data = data[data !=0 ]
         # data = data[self.channel_range[0]:self.channel_range[1]+1, :]
         return self.scaler * data
