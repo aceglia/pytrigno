@@ -22,13 +22,15 @@ class LegacySensor:
         self.type = 'A'
 
 class SensorType(Enum):
-    ALL = "All"
-    Avanti_all = "Avanti_all" 
-    Avanti_emg = "Avanti_emg" 
-    Avanti_aux = "Avanti_aux" 
-    Legacy_all = "Legacy_all" 
-    Legacy_emg = "Legacy_emg" 
-    Legacy_aux = "Legacy_aux" 
+    AVANTI = "Avanti"
+    LEGACY = "Legacy"
+    # ALL = "All"
+    # Avanti_all = "Avanti_all" 
+    # Avanti_emg = "Avanti_emg" 
+    # Avanti_aux = "Avanti_aux" 
+    # Legacy_all = "Legacy_all" 
+    # Legacy_emg = "Legacy_emg" 
+    # Legacy_aux = "Legacy_aux" 
 
 
 

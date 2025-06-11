@@ -5,7 +5,8 @@ from queue import Queue
 import time
 
 import numpy as np
-from .enums import AvantiSensor, LegacySensor, SensorType
+from .enums import AvantiSensor, LegacySensor
+from .sensor import Sensor, Type
 
 
 BYTES_PER_CHANNEL = 4
@@ -14,7 +15,8 @@ EMG_SAMPLE_RATE = 2000
 AUX_SAMPLE_RATE = 148.148
 
 class TrignoSDKClient:
-    def __init__(self, host='127.0.0.1', cmd_port=50040, timeout=2.0, fast_mode=False):
+    def __init__(self, host='127.0.0.1', cmd_port=50040, timeout=2.0, fast_mode=False, buffer_size=1000):
+        self.buffer_size = buffer_size
         self.host = host
         self.cmd_port = cmd_port
         self.timeout = timeout
@@ -48,15 +50,12 @@ class TrignoSDKClient:
 
     def connect(self):
         """Establish connection to Trigno SDK command port."""
-        # self._comm_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self._comm_socket.settimeout(self.timeout)
-        # self._comm_socket.connect((self.host, self.cmd_port))
         self._comm_socket = socket.create_connection(
             (self.host, self.cmd_port), self.timeout)
         self.send_command("BACKWARDS COMPATIBILITY OFF")
         self.initiate_data_connection()
+        self.initialize_sensors()
 
-        # Try to clear buffer (flush)
         try:
             _ = self._comm_socket.recv(1024)
         except socket.timeout:
@@ -72,6 +71,32 @@ class TrignoSDKClient:
                            "legacy_emg": self.legacy_emg_socket,
                            "legacy_aux": self.legacy_aux_socket,
                            }
+        self.all_events = {"avanti_emg": threading.Event(), 
+                           "avanti_aux": threading.Event(),
+                           "legacy_emg": threading.Event(),
+                           "legacy_aux": threading.Event(),
+                           }
+
+    def initialize_sensors(self):
+        """Initialize all sensors."""
+        self.sensors = [Sensor(i, self, self.buffer_size) for i in range(1, 16)]
+        self._get_which_thread_to_run()
+        
+    def _get_which_thread_to_run(self):
+        is_avanti = [False, False] # EMG and AUX
+        is_legacy = [False, False] # EMG and AUX
+        for sensor in self.sensors:
+            if not sensor.is_paired:
+                continue
+            avanti = True if sensor.type == Type.Avanti or sensor.type == Type.AvantiGoniometer else False
+            is_avanti[0] = avanti and sensor.nb_emg_channels if not is_avanti[0] else True
+            is_avanti[1] = avanti and sensor.nb_aux_channels if not is_avanti[1] else True
+            is_legacy[0] = sensor.type == Type.Legacy and sensor.nb_emg_channels if not is_legacy[0] else True
+            is_legacy[1] = sensor.type == Type.Legacy and sensor.nb_aux_channels if not is_legacy[1] else True
+        self._threads_to_run = {"avanti_emg": is_avanti[0], 
+                                "avanti_aux": is_avanti[1], 
+                                "legacy_emg": is_legacy[0], 
+                                "legacy_aux": is_legacy[1]}
 
     def _connect_to_socket(self, port):
         _data_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -108,12 +133,12 @@ class TrignoSDKClient:
             return ""
         
         # Give the server time to respond
-        time.sleep(0.5)
+        time.sleep(0.3)
         try:
             response = self._comm_socket.recv(1024)
             return response.decode('ascii').strip()
         except socket.timeout:
-            raise RuntimeError("Streaming not started")
+            return None
         
     def read(self, connection, buffer_size, n_channels):
         l = 0
@@ -125,11 +150,11 @@ class TrignoSDKClient:
         data = np.transpose(data.reshape((-1, n_channels)))
         return data
 
-    def start_streaming(self, type: SensorType=SensorType.ALL):
+    def start_streaming(self):
         is_started = self.send_command("START") == "OK"
         if not is_started and not self.fast_mode:
             raise RuntimeError("Streaming not started.")
-        self._launch_threads(type)
+        self._launch_threads()
 
     def buffer_size_for_type(self, name):
         if "emg" in name:
@@ -138,13 +163,13 @@ class TrignoSDKClient:
             buffer_size = n_channel * n_samples * BYTES_PER_CHANNEL
         elif "aux" in name:
             n_samples = self.get_max_aux_samples()
-            n_channel = 144
+            n_channel = 144 if "avanti" in name.lower() else 48
             buffer_size = n_channel * n_samples * BYTES_PER_CHANNEL
         else:
             raise RuntimeError("Invalid sensor type.")
         return buffer_size, n_channel, n_samples
 
-    def _launch_one_thread(self, socket_tmp, name, data_queue):
+    def _launch_one_thread(self, socket_tmp, name, data_queue, event):
         buffer_size, n_chanels, n_samples = self.buffer_size_for_type(name)
         def _thread_func():
             count = 0
@@ -152,26 +177,25 @@ class TrignoSDKClient:
                 data = self.read(socket_tmp, buffer_size, n_chanels)
                 data_queue.queue.clear()
                 data_queue.put_nowait((data, count))
+                event.set()
                 count += n_samples
         thread = threading.Thread(target=_thread_func, name=name)
         thread.start()
 
-    def _launch_threads(self, type):
-        if type == SensorType.ALL:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys()]
-        elif type == SensorType.Avanti_all:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "avanti" in name]
-        elif type == SensorType.Avanti_emg:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "avanti" in name and "emg" in name]
-        elif type == SensorType.Avanti_aux:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "avanti" in name and "aux" in name]
-        elif type == SensorType.Legacy_all:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "legacy" in name]
-        elif type == SensorType.Legacy_emg:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "legacy" in name and "emg" in name]
-        elif type == SensorType.Legacy_aux:
-            _ = [self._launch_one_thread(self.all_socket[name], name, self.all_queue[name]) for name in self.all_socket.keys() if "legacy" in name and "aux" in name]
-            
+    def _launch_threads(self):
+        all_soc, all_q, all_ev = self.all_socket, self.all_queue, self.all_events
+        _ = [self._launch_one_thread(all_soc[n], n, all_q[n], all_ev[n]) for n in self._threads_to_run.keys() if self._threads_to_run[n]]
+   
+        def _main_thread_func():
+            while True:
+                for name in self.all_socket.keys():
+                    self.all_events[name].wait()
+                    self.all_events[name].clear()
+                self._set_all_data()
+
+        main_thread = threading.Thread(target=_main_thread_func, name='main')
+        main_thread.start()
+        
     def stop_streaming(self):
         return self.send_command("STOP")
     
@@ -229,6 +253,18 @@ class TrignoSDKClient:
     def is_sensor_paired(self, n):
         return self.send_command(f"SENSOR {n} PAIRED?") == "YES"
 
+    def get_sensor_idx(self, n):
+        return int(self.send_command(f"SENSOR {n} STARTINDEX?"))
+    
+    def get_list_sensors_and_idx(self):
+        sensors = []
+        for i in range(1, 16):
+            if self.is_sensor_paired(i):
+                sensors.append([self.get_sensor_info(i, 'TYPE'), self.get_sensor_idx(i)])
+            else:
+                sensors.append([None, None])
+        return sensors
+    
     def pair_sensor(self, n):
         return self.send_command(f"SENSOR {n} PAIR")
 
@@ -261,25 +297,37 @@ class TrignoSDKClient:
 
     def _set_avanti_emg_data(self):
         try:
-            self._last_data["avanti_emg"] = self.avanti_emg_queue.get_nowait()
+            data = self.avanti_emg_queue.get_nowait()
+            for sensor in self.sensors:
+                if sensor.type == Type.Avanti or sensor.type == Type.AvantiGogniometer:
+                    sensor.update_emg_buffer(data[0][sensor.emg_range[0]:sensor.emg_range[1], :], data[1])
         except:
             return
     
     def _set_avanti_aux_data(self):
         try:
-            self._last_data["avanti_aux"] = self.avanti_aux_queue.get_nowait()
+            data = self.avanti_aux_queue.get_nowait()
+            for sensor in self.sensors:
+                if sensor.type == Type.Avanti or sensor.type == Type.AvantiGogniometer:
+                    sensor.update_aux_buffer(data[0][sensor.aux_range[0]:sensor.aux_range[1], :], data[1])
         except:
             return
         
     def _set_legacy_emg_data(self):
         try:
-            self._last_data["legacy_emg"] = self.legacy_emg_queue.get_nowait()
+            data = self.legacy_emg_queue.get_nowait()
+            for sensor in self.sensors:
+                if sensor.type == Type.Legacy:
+                    sensor.update_emg_buffer(data[0][sensor.emg_range[0]:sensor.emg_range[1], :], data[1])
         except:
             return
         
     def _set_legacy_aux_data(self):
         try:
-            self._last_data["legacy_aux"] = self.legacy_aux_queue.get_nowait()
+            data = self.legacy_aux_queue.get_nowait()
+            for sensor in self.sensors:
+                if sensor.type == Type.Legacy:
+                    sensor.update_aux_buffer(data[0][sensor.aux_range[0]:sensor.aux_range[1], :], data[1])
         except:
             return
     
@@ -289,32 +337,6 @@ class TrignoSDKClient:
         self._set_legacy_emg_data(),
         self._set_legacy_aux_data(),
         
-
-    def get_avanti_emg_data(self):
-        self._set_avanti_emg_data()
-        return self._last_data["avanti_emg"]
-
-    
-    def get_avanti_aux_data(self):
-        self._set_avanti_aux_data()
-        return self._last_data["avanti_aux"]
-
-        
-    def get_legacy_emg_data(self):
-        self._set_legacy_emg_data()
-        return self._last_data["legacy_emg"]
-
-    def get_legacy_aux_data(self):
-        self._set_legacy_aux_data()
-        return self._last_data["legacy_aux"]
-
-    def get_all_data(self):
-        return {
-            "avanti_emg": self.get_avanti_emg_data(),
-            "avanti_aux": self.get_avanti_aux_data(),
-            "legacy_emg": self.get_legacy_emg_data(),
-            "legacy_aux": self.get_legacy_aux_data(),
-        }
             
 
 
